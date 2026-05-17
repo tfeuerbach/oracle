@@ -1,0 +1,19 @@
+.discord-btn {
+  background-color: #5865F2 !important;
+  border-color: #5865F2 !important;
+  color: #fff !important;
+  border-radius: 3px;
+  font-weight: 600;
+  transition: background-color 0.17s ease, box-shadow 0.17s ease;
+}
+
+.discord-btn:hover {
+  background-color: #4752C4 !important;
+  border-color: #4752C4 !important;
+  box-shadow: 0 4px 12px rgba(88, 101, 242, 0.4);
+}
+
+.discord-btn:active {
+  background-color: #3C45A5 !important;
+  border-color: #3C45A5 !important;
+}

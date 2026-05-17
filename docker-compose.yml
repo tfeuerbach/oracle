@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    container_name: oracle
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 4g
+    volumes:
+      - oracle-data:/app/data
+      - oracle-tmp:/app/tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  oracle-data:
+  oracle-tmp:
