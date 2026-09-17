@@ -21,6 +21,7 @@ from .config import (
     LOCAL_WHISPER_MODEL,
     YTDLP_COOKIES_FILE,
     YTDLP_COOKIES_BROWSER,
+    EMBED_MAX_FILE_BYTES,
 )
 
 log = logging.getLogger("oracle.transcriber")
@@ -421,10 +422,8 @@ class TooLong(Exception):
         self.duration = duration
 
 
-def ytdlp_download(url: str, output_path: Path):
-    """Download audio via yt-dlp. Returns the info dict."""
-    ydl_opts = {
-        "format": "bestaudio/best",
+def ytdlp_base_opts(output_path: Path):
+    opts = {
         "outtmpl": str(output_path.with_suffix(".%(ext)s")),
         "quiet": True,
         "no_warnings": True,
@@ -433,17 +432,26 @@ def ytdlp_download(url: str, output_path: Path):
         "socket_timeout": 15,
         "retries": 2,
         "js_runtimes": {"node": {}},
+        "logger": log,
+    }
+    if YTDLP_COOKIES_FILE:
+        opts["cookiefile"] = YTDLP_COOKIES_FILE
+    if YTDLP_COOKIES_BROWSER:
+        opts["cookiesfrombrowser"] = (YTDLP_COOKIES_BROWSER,)
+    return opts
+
+
+def ytdlp_download(url: str, output_path: Path):
+    """Download audio via yt-dlp. Returns the info dict."""
+    ydl_opts = ytdlp_base_opts(output_path)
+    ydl_opts.update({
+        "format": "bestaudio/best",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "m4a",
             "preferredquality": "64",
         }],
-        "logger": log,
-    }
-    if YTDLP_COOKIES_FILE:
-        ydl_opts["cookiefile"] = YTDLP_COOKIES_FILE
-    if YTDLP_COOKIES_BROWSER:
-        ydl_opts["cookiesfrombrowser"] = (YTDLP_COOKIES_BROWSER,)
+    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if info is None:
@@ -453,6 +461,95 @@ def ytdlp_download(url: str, output_path: Path):
         if duration > MAX_VIDEO_DURATION:
             raise TooLong(title, duration)
         return ydl.extract_info(url, download=True) or info
+
+
+def ytdlp_download_video(url: str, output_path: Path):
+    """Download a video file via yt-dlp. Returns (info dict, path to file)."""
+    ydl_opts = ytdlp_base_opts(output_path)
+    ydl_opts.update({
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+        "merge_output_format": "mp4",
+    })
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if info is None:
+            raise yt_dlp.utils.DownloadError(f"No info extracted for {url}")
+        duration = info.get("duration") or 0
+        title = info.get("title") or url
+        if duration > MAX_VIDEO_DURATION:
+            raise TooLong(title, duration)
+        info = ydl.extract_info(url, download=True) or info
+
+    expected = output_path.with_suffix(".mp4")
+    if expected.exists():
+        return info, expected
+    candidates = sorted(TEMP_DIR.glob(f"{output_path.name}.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise yt_dlp.utils.DownloadError(f"yt-dlp produced no file for {url}")
+    return info, candidates[0]
+
+
+EMBED_SOURCES = {"instagram", "tiktok", "reddit", "youtube"}
+
+
+def is_youtube_short(url: str):
+    return "/shorts/" in urlparse(url).path.lower()
+
+
+async def download_for_embed(url: str):
+    """Download a supported video for Discord upload.
+
+    Supports Instagram, TikTok, Reddit, and YouTube Shorts.
+    Returns (video_path, title, source). Caller must delete video_path when done.
+    """
+    matches = extract_video_urls(url)
+    if not matches:
+        domain = urlparse(url.strip()).netloc.lower()
+        source = VIDEO_URL_DOMAINS.get(domain)
+        if not source:
+            raise ValueError(
+                "Not a supported link. Use Instagram, TikTok, Reddit, or a YouTube Short."
+            )
+        matches = [(url.strip().rstrip(".,;:!?"), source)]
+
+    resolved_url, source = matches[0]
+    if source not in EMBED_SOURCES:
+        raise ValueError(
+            "Only Instagram, TikTok, Reddit, and YouTube Shorts are supported for /embed."
+        )
+    if source == "youtube" and not is_youtube_short(resolved_url):
+        raise ValueError("For YouTube, only Shorts links are supported (/shorts/...).")
+
+    if source in ("instagram", "reddit"):
+        resolved = await resolve_redirect(resolved_url)
+        if resolved != resolved_url:
+            log.info("Resolved %s -> %s", resolved_url, resolved)
+            resolved_url = resolved
+
+    if source == "reddit":
+        pre = await reddit_pre_check(resolved_url)
+        if pre is not None:
+            # reddit_pre_check returns a transcription-style tuple for non-video posts
+            raise ValueError("That Reddit post doesn't look like a video.")
+
+    task_id = id(asyncio.current_task())
+    out_base = TEMP_DIR / f"embed_{task_id}"
+    log.info("Embedding download: %s (%s)", resolved_url, source)
+    info, path = await asyncio.wait_for(
+        asyncio.to_thread(ytdlp_download_video, resolved_url, out_base),
+        timeout=300,
+    )
+    title = (info or {}).get("title") or "video"
+
+    size = path.stat().st_size
+    if size > EMBED_MAX_FILE_BYTES:
+        path.unlink(missing_ok=True)
+        raise ValueError(
+            f"Video is too large ({size / 1e6:.0f} MB). Max for /embed is "
+            f"{EMBED_MAX_FILE_BYTES / 1e6:.0f} MB."
+        )
+
+    return path, title, source
 
 
 async def process_url(

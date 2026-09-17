@@ -2,27 +2,32 @@
   <img src="docs/assets/logo.png" alt="Oracle" width="128">
 </p>
 
-# Oracle
+<h1 align="center">Oracle</h1>
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
+  <a href="Dockerfile"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
+  <!-- <a href="https://top.gg/bot/TODO"><img src="https://img.shields.io/badge/top.gg-vote-ff3366.svg" alt="top.gg"></a> -->
+</p>
 
-A Discord bot that transcribes videos and makes them searchable by what was said.
+<p align="center">
+  Discord bot that transcribes videos and makes them searchable by what was said.
+</p>
 
-Supports file attachments (MP4, WebM, MOV, etc.) and URL videos (YouTube, Reddit, Vimeo, TikTok, Instagram, Twitter/X, and more). Transcriptions are stored per-server with full-text search.
+<p align="center">
+  <a href="https://oracle.tfeuerbach.dev/getting-started/">Add to your server</a> · <a href="https://oracle.tfeuerbach.dev">Docs</a> · <a href="https://oracle.tfeuerbach.dev/self-hosting/">Self-Host</a>
+</p>
 
-[Add to your server](https://oracle.tfeuerbach.dev/getting-started/) | [Documentation](https://oracle.tfeuerbach.dev) | [Self-Hosting Guide](https://oracle.tfeuerbach.dev/self-hosting/)
+---
 
-<!-- [top.gg](https://top.gg/bot/TODO) -->
+Supports file attachments and URL videos (YouTube, Reddit, TikTok, Instagram, Twitter/X, Vimeo, and more). Transcriptions are stored per-server with full-text and semantic search.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/tfeuerbach/oracle.git
-cd oracle
-cp .env.example .env
-# Fill in DISCORD_TOKEN (OPENAI_API_KEY only needed for API mode)
+git clone https://github.com/tfeuerbach/oracle.git && cd oracle
+cp .env.example .env   # add DISCORD_TOKEN, optionally OPENAI_API_KEY
 docker compose up -d
 ```
 
@@ -30,35 +35,35 @@ docker compose up -d
 
 | Command | Description |
 |---------|-------------|
-| `/search <query>` | Semantic search -- finds videos by meaning, not just keywords |
-| `/preference` | Set how Oracle responds to you (public, private, DM) |
-| `/stats` | Show indexing statistics |
-| `/setup` | Initial channel selection |
-| `/settings` | Configure server-wide response mode and bot preferences |
-| `/watch <channel>` | Add a channel to the monitoring list |
-| `/unwatch <channel>` | Remove a channel |
+| `/search <query>` | Find videos by what was said (keyword + semantic) |
+| `/embed <url>` | Download Instagram/TikTok/Reddit/YouTube Shorts and post it here |
+| `/preference` | Set how results are sent to you (public, private, DM) |
+| `/stats` | Indexing stats for the server |
+| `/setup` | Pick channels to monitor |
+| `/settings` | Server-wide response mode (admin) |
+| `/watch` / `/unwatch` | Add or remove a monitored channel |
 | `/watching` | List monitored channels |
-| `/backfill [channel]` | Index all past videos in a channel |
-| `/backfill_server` | Index all past videos server-wide |
-| `/stop_backfill` | Cancel all running backfills in this server |
+| `/backfill [channel]` | Index past videos in a channel |
+| `/backfill_server` | Index past videos server-wide |
+| `/stop_backfill` | Cancel running backfills |
 
-## Project structure
+## Project layout
 
 ```
 oracle/
-  __main__.py      Entry point (python -m oracle)
-  bot.py           Discord client and event handlers
-  commands.py      Slash command definitions
-  backfill.py      Channel history scanning and batch processing
-  transcriber.py   Video download, audio extraction, Whisper
-  embeddings.py    Semantic search (OpenAI API or local)
-  database.py      SQLite schema, FTS5 search, channel cache
-  views.py         Discord UI components (setup flow)
-  config.py        Environment variables and constants
-  cli.py           Database inspection tool (python -m oracle.cli)
+  __main__.py      python -m oracle
+  bot.py           client + event handlers
+  commands.py      slash commands
+  backfill.py      history scanning + batch processing
+  transcriber.py   download, ffmpeg, whisper
+  embeddings.py    vector search (OpenAI or local)
+  database.py      sqlite, fts5, cache
+  views.py         discord UI (setup, settings)
+  config.py        env vars + constants
+  cli.py           database inspector (python -m oracle.cli)
 ```
 
-## Running locally
+## Run locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -66,28 +71,21 @@ pip install -r requirements.txt
 python -m oracle
 ```
 
-Requires `ffmpeg` on PATH. Database inspection:
+Needs `ffmpeg` on PATH.
 
-```bash
-python -m oracle.cli recent -n 5
-python -m oracle.cli search "some phrase"
-```
+## Run fully local (no API)
 
-## Running fully local (no OpenAI API)
+Set `WHISPER_MODE=local` + install [openai-whisper](https://github.com/openai/whisper). CUDA GPU recommended.
 
-Oracle can run entirely on your own hardware with no API costs or external calls.
+Set `EMBEDDING_PROVIDER=local` + install [sentence-transformers](https://www.sbert.net/). Runs fine on CPU.
 
-**Transcription** -- Install [openai-whisper](https://github.com/openai/whisper) and set `WHISPER_MODE=local`. A CUDA GPU is strongly recommended.
-
-**Semantic search** -- Set `EMBEDDING_PROVIDER=local` and install [sentence-transformers](https://www.sbert.net/). Oracle uses `all-MiniLM-L6-v2` by default (~80 MB, runs on CPU or GPU). Set `LOCAL_EMBEDDING_MODEL` to use a different model from Hugging Face.
-
-Both features work without an OpenAI API key. See the [self-hosting guide](https://oracle.tfeuerbach.dev/self-hosting/#running-fully-local) for model options, hardware requirements, and Docker GPU passthrough.
+No OpenAI key needed. Details in the [self-hosting guide](https://oracle.tfeuerbach.dev/self-hosting/#running-fully-local).
 
 ## Scaling
 
-Oracle runs as a single container with SQLite and handles dozens of servers comfortably. Concurrency is managed with asyncio semaphores, and the real throughput bottleneck is the Whisper API rate limit.
+Single container + SQLite handles dozens of servers. The bottleneck is Whisper API rate limits, not compute.
 
-If demand grows beyond what a single process can handle, the migration path is: PostgreSQL (shared state), Redis (distributed task queue), and separate worker containers. See the [architecture docs](https://oracle.tfeuerbach.dev/architecture/) for details.
+Growth path: PostgreSQL → Redis task queue → worker containers. See [architecture](https://oracle.tfeuerbach.dev/architecture/).
 
 ## License
 

@@ -5,7 +5,7 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
-from .config import SEARCH_RESULTS_LIMIT
+from .config import SEARCH_RESULTS_LIMIT, MAX_VIDEO_DURATION, EMBED_MAX_FILE_BYTES
 from .database import (
     search_transcriptions,
     get_guild_stats,
@@ -26,6 +26,7 @@ from .database import (
 from .embeddings import generate_embedding, semantic_search
 from .backfill import backfill_channel, backfill_guild, cancel_backfills, active_backfill_keys
 from .views import SetupView, SettingsView, build_settings_embed, RESPONSE_MODE_LABELS
+from .transcriber import download_for_embed, TooLong
 
 log = logging.getLogger("oracle.commands")
 
@@ -305,6 +306,73 @@ def register(tree: app_commands.CommandTree):
                 "This overrides the server default for your queries.",
                 ephemeral=True,
             )
+
+    @tree.command(name="embed", description="Download Instagram, TikTok, Reddit, or YouTube Shorts and post them here")
+    @app_commands.describe(url="Instagram, TikTok, Reddit, or YouTube Shorts link")
+    @app_commands.guild_only()
+    async def cmd_embed(interaction: discord.Interaction, url: str):
+        await interaction.response.defer(thinking=True)
+
+        video_path = None
+        try:
+            video_path, title, source = await download_for_embed(url)
+        except ValueError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
+            return
+        except TooLong as e:
+            m, s = divmod(int(e.duration), 60)
+            await interaction.followup.send(
+                f"Video is too long ({m}:{s:02d}). Max is {MAX_VIDEO_DURATION // 60} minutes.",
+                ephemeral=True,
+            )
+            return
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Download timed out. Try again later.", ephemeral=True)
+            return
+        except Exception as e:
+            log.warning("Embed failed for %s: %s", url, e)
+            await interaction.followup.send(
+                "Couldn't download that video. It may be private, deleted, or region-locked.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            size = video_path.stat().st_size
+            if size > EMBED_MAX_FILE_BYTES:
+                await interaction.followup.send(
+                    f"Downloaded video is too large "
+                    f"({size / 1e6:.1f} MB, limit {EMBED_MAX_FILE_BYTES / 1e6:.0f} MB).",
+                    ephemeral=True,
+                )
+                return
+
+            safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in title)[:80]
+            if not safe_name:
+                safe_name = "video"
+            if not video_path.suffix:
+                safe_name += ".mp4"
+            else:
+                safe_name += video_path.suffix
+
+            file = discord.File(video_path, filename=safe_name)
+            await interaction.followup.send(
+                content=f"**{title}**\n`{source}` · requested by {interaction.user.mention}",
+                file=file,
+            )
+            log.info("Embedded %s (%s, %.1f MB) in #%s", title, source, size / 1e6, interaction.channel)
+        except discord.HTTPException as e:
+            log.warning("Failed to upload embed for %s: %s", url, e)
+            await interaction.followup.send(
+                "Downloaded the video but Discord rejected the upload "
+                f"(file may exceed this server's upload limit).",
+                ephemeral=True,
+            )
+        finally:
+            if video_path:
+                video_path.unlink(missing_ok=True)
+                for leftover in video_path.parent.glob(f"{video_path.stem}.*"):
+                    leftover.unlink(missing_ok=True)
 
     @tree.command(name="backfill_server", description="Index all past videos across the entire server")
     @app_commands.default_permissions(administrator=True)

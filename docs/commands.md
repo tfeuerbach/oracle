@@ -27,6 +27,16 @@ Show indexing statistics for the current server — total videos indexed, total 
 
 List all channels currently being monitored for videos.
 
+### `/embed`
+
+Download a video and post it in the current channel so people can watch without leaving Discord.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | Instagram, TikTok, Reddit, or YouTube Shorts link (including proxies like `kkinstagram.com` / `tnktok.com`) |
+
+Supported: Instagram, TikTok, Reddit video posts, and YouTube Shorts only (`/shorts/...`). Max file size is 200 MB. The video is downloaded temporarily, uploaded to the channel, then deleted from disk.
+
 ### `/preference`
 
 Set how Oracle responds to **you** in this server. This overrides the server-wide response mode for your own queries.
