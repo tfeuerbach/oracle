@@ -126,6 +126,8 @@ sudo systemctl start oracle
 | `EMBEDDING_PROVIDER` | No | `openai` | `openai` (API) or `local` (sentence-transformers) |
 | `LOCAL_EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | Hugging Face model for local embeddings |
 | `SEMANTIC_SIMILARITY_THRESHOLD` | No | `0.3` | Minimum cosine similarity for semantic results (0.0–1.0) |
+| `EMBED_MAX_FILE_BYTES` | No | `209715200` (200 MB) | Hard max download size for `/embed` |
+| `EMBED_COMPRESS_THRESHOLD_BYTES` | No | `10485760` (10 MB) | Compress/scale `/embed` videos larger than this |
 | `MAX_CONCURRENT_TRANSCRIPTIONS` | No | `5` | Max videos processed simultaneously |
 | `MAX_VIDEO_DURATION` | No | `3600` | Max video length in seconds (longer videos are skipped) |
 | `ORACLE_DATA_DIR` | No | `.` | Root directory for `data/` and `tmp/` |

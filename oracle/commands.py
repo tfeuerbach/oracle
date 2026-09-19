@@ -5,7 +5,7 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
-from .config import SEARCH_RESULTS_LIMIT, MAX_VIDEO_DURATION, EMBED_MAX_FILE_BYTES
+from .config import SEARCH_RESULTS_LIMIT, MAX_VIDEO_DURATION, EMBED_MAX_FILE_BYTES, EMBED_COMPRESS_THRESHOLD_BYTES
 from .database import (
     search_transcriptions,
     get_guild_stats,
@@ -26,7 +26,7 @@ from .database import (
 from .embeddings import generate_embedding, semantic_search
 from .backfill import backfill_channel, backfill_guild, cancel_backfills, active_backfill_keys
 from .views import SetupView, SettingsView, build_settings_embed, RESPONSE_MODE_LABELS
-from .transcriber import download_for_embed, TooLong
+from .transcriber import download_for_embed, compress_for_embed, TooLong
 
 log = logging.getLogger("oracle.commands")
 
@@ -314,6 +314,7 @@ def register(tree: app_commands.CommandTree):
         await interaction.response.defer(thinking=True)
 
         video_path = None
+        upload_path = None
         try:
             video_path, title, source = await download_for_embed(url)
         except ValueError as e:
@@ -347,32 +348,61 @@ def register(tree: app_commands.CommandTree):
                 )
                 return
 
+            upload_path = video_path
+            if size > EMBED_COMPRESS_THRESHOLD_BYTES:
+                try:
+                    upload_path = await asyncio.to_thread(
+                        compress_for_embed, video_path, EMBED_COMPRESS_THRESHOLD_BYTES,
+                    )
+                except Exception as e:
+                    log.warning("Compress failed for %s, uploading original: %s", url, e)
+                    upload_path = video_path
+
+            upload_size = upload_path.stat().st_size
+            if upload_size > EMBED_MAX_FILE_BYTES:
+                await interaction.followup.send(
+                    f"Video is still too large after compression "
+                    f"({upload_size / 1e6:.1f} MB).",
+                    ephemeral=True,
+                )
+                return
+
             safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in title)[:80]
             if not safe_name:
                 safe_name = "video"
-            if not video_path.suffix:
-                safe_name += ".mp4"
-            else:
-                safe_name += video_path.suffix
+            safe_name += ".mp4"
 
-            file = discord.File(video_path, filename=safe_name)
+            file = discord.File(upload_path, filename=safe_name)
+            note = ""
+            if upload_path != video_path and size > upload_size:
+                note = f" · compressed {size / 1e6:.1f}→{upload_size / 1e6:.1f} MB"
             await interaction.followup.send(
-                content=f"**{title}**\n`{source}` · requested by {interaction.user.mention}",
+                content=(
+                    f"**{title}**\n"
+                    f"`{source}` · requested by {interaction.user.mention}{note}"
+                ),
                 file=file,
             )
-            log.info("Embedded %s (%s, %.1f MB) in #%s", title, source, size / 1e6, interaction.channel)
+            log.info(
+                "Embedded %s (%s, %.1f MB) in #%s",
+                title, source, upload_size / 1e6, interaction.channel,
+            )
         except discord.HTTPException as e:
             log.warning("Failed to upload embed for %s: %s", url, e)
             await interaction.followup.send(
                 "Downloaded the video but Discord rejected the upload "
-                f"(file may exceed this server's upload limit).",
+                "(file may exceed this server's upload limit).",
                 ephemeral=True,
             )
         finally:
-            if video_path:
-                video_path.unlink(missing_ok=True)
-                for leftover in video_path.parent.glob(f"{video_path.stem}.*"):
+            for path in {p for p in (video_path, upload_path) if p}:
+                path.unlink(missing_ok=True)
+                for leftover in path.parent.glob(f"{path.stem}.*"):
                     leftover.unlink(missing_ok=True)
+                # also clear intermediate compress passes for the original stem
+                if video_path:
+                    for leftover in video_path.parent.glob(f"{video_path.stem}_c*.mp4"):
+                        leftover.unlink(missing_ok=True)
 
     @tree.command(name="backfill_server", description="Index all past videos across the entire server")
     @app_commands.default_permissions(administrator=True)

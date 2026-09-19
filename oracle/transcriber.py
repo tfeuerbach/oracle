@@ -22,6 +22,7 @@ from .config import (
     YTDLP_COOKIES_FILE,
     YTDLP_COOKIES_BROWSER,
     EMBED_MAX_FILE_BYTES,
+    EMBED_COMPRESS_THRESHOLD_BYTES,
 )
 
 log = logging.getLogger("oracle.transcriber")
@@ -491,9 +492,85 @@ def ytdlp_download_video(url: str, output_path: Path):
 
 EMBED_SOURCES = {"instagram", "tiktok", "reddit", "youtube"}
 
+# Progressive compress attempts: (max width, crf, audio kbps)
+EMBED_COMPRESS_PASSES = (
+    (720, 28, 96),
+    (540, 32, 64),
+    (360, 35, 48),
+)
+
 
 def is_youtube_short(url: str):
     return "/shorts/" in urlparse(url).path.lower()
+
+
+def compress_for_embed(video_path: Path, target_bytes: int = None):
+    """Scale/re-encode a video to fit under target_bytes. Returns path to output file.
+
+    Tries progressively smaller resolutions until under the target (default 10 MB).
+    Caller owns cleanup of both the original and returned path if they differ.
+    """
+    target = target_bytes or EMBED_COMPRESS_THRESHOLD_BYTES
+    size = video_path.stat().st_size
+    if size <= target:
+        return video_path
+
+    duration = get_duration(video_path) or 0
+    log.info(
+        "Compressing embed video %.1f MB -> target %.1f MB (duration=%.1fs)",
+        size / 1e6, target / 1e6, duration,
+    )
+
+    best_path = None
+    best_size = size
+
+    for max_w, crf, audio_kbps in EMBED_COMPRESS_PASSES:
+        out = video_path.with_name(f"{video_path.stem}_c{max_w}.mp4")
+        # Cap video bitrate so short clips still land near the target size
+        if duration > 1:
+            # leave ~15% headroom for container overhead
+            total_kbps = int((target * 8 * 0.85) / duration / 1000)
+            video_kbps = max(total_kbps - audio_kbps, 150)
+            bitrate_args = ["-b:v", f"{video_kbps}k", "-maxrate", f"{video_kbps}k", "-bufsize", f"{video_kbps * 2}k"]
+        else:
+            bitrate_args = []
+
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vf", f"scale='min({max_w},iw)':-2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+            *bitrate_args,
+            "-c:a", "aac", "-b:a", f"{audio_kbps}k",
+            "-movflags", "+faststart",
+            str(out),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0 or not out.exists():
+            log.warning("Compress pass %dp failed: %s", max_w, (result.stderr or "")[-300:])
+            out.unlink(missing_ok=True)
+            continue
+
+        out_size = out.stat().st_size
+        log.info("  compress pass %dp -> %.1f MB", max_w, out_size / 1e6)
+
+        if best_path and best_path != out:
+            best_path.unlink(missing_ok=True)
+        best_path = out
+        best_size = out_size
+
+        if out_size <= target:
+            break
+
+    if best_path is None:
+        raise RuntimeError("ffmpeg failed to compress video for embed")
+
+    if best_size > target:
+        log.warning(
+            "Compressed embed still %.1f MB (target %.1f MB) -- uploading best effort",
+            best_size / 1e6, target / 1e6,
+        )
+
+    return best_path
 
 
 async def download_for_embed(url: str):

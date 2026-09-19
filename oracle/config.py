@@ -70,8 +70,10 @@ LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.3"))
 
-# Max size for /embed downloads and uploads (Discord guild limits may still apply)
+# Max size for /embed downloads (hard reject above this)
 EMBED_MAX_FILE_BYTES = int(os.getenv("EMBED_MAX_FILE_BYTES", str(200 * 1024 * 1024)))
+# Compress/scale when larger than this before uploading
+EMBED_COMPRESS_THRESHOLD_BYTES = int(os.getenv("EMBED_COMPRESS_THRESHOLD_BYTES", str(10 * 1024 * 1024)))
 
 YTDLP_COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "")
 YTDLP_COOKIES_BROWSER = os.getenv("YTDLP_COOKIES_BROWSER", "")
