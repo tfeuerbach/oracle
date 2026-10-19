@@ -36,7 +36,7 @@ docker compose up -d
 | Command | Description |
 |---------|-------------|
 | `/search <query>` | Find videos by what was said (keyword + semantic) |
-| `/embed <url>` | Download Instagram/TikTok/Reddit/YouTube Shorts and post it here |
+| `/embed <url>` | Post YouTube, Instagram, TikTok, or Reddit as an inline video |
 | `/preference` | Set how results are sent to you (public, private, DM) |
 | `/stats` | Indexing stats for the server |
 | `/setup` | Pick channels to monitor |

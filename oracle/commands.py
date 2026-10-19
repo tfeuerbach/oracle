@@ -5,7 +5,7 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
-from .config import SEARCH_RESULTS_LIMIT, MAX_VIDEO_DURATION, EMBED_MAX_FILE_BYTES, EMBED_COMPRESS_THRESHOLD_BYTES
+from .config import SEARCH_RESULTS_LIMIT
 from .database import (
     search_transcriptions,
     get_guild_stats,
@@ -26,7 +26,7 @@ from .database import (
 from .embeddings import generate_embedding, semantic_search
 from .backfill import backfill_channel, backfill_guild, cancel_backfills, active_backfill_keys
 from .views import SetupView, SettingsView, build_settings_embed, RESPONSE_MODE_LABELS
-from .transcriber import download_for_embed, compress_for_embed, TooLong
+from .transcriber import embed_url_candidates
 
 log = logging.getLogger("oracle.commands")
 
@@ -307,106 +307,51 @@ def register(tree: app_commands.CommandTree):
                 ephemeral=True,
             )
 
-    @tree.command(name="embed", description="Download Instagram, TikTok, Reddit, or YouTube Shorts and post them here")
-    @app_commands.describe(url="Instagram, TikTok, Reddit, or YouTube Shorts link")
+    @tree.command(name="embed", description="Post a YouTube, Instagram, TikTok, or Reddit link as an inline video")
+    @app_commands.describe(url="YouTube, Instagram, TikTok, or Reddit link")
     @app_commands.guild_only()
     async def cmd_embed(interaction: discord.Interaction, url: str):
         await interaction.response.defer(thinking=True)
-
-        video_path = None
-        upload_path = None
         try:
-            video_path, title, source = await download_for_embed(url)
+            candidates, source = await embed_url_candidates(url)
         except ValueError as e:
             await interaction.followup.send(str(e), ephemeral=True)
             return
-        except TooLong as e:
-            m, s = divmod(int(e.duration), 60)
-            await interaction.followup.send(
-                f"Video is too long ({m}:{s:02d}). Max is {MAX_VIDEO_DURATION // 60} minutes.",
-                ephemeral=True,
-            )
-            return
-        except asyncio.TimeoutError:
-            await interaction.followup.send("Download timed out. Try again later.", ephemeral=True)
-            return
         except Exception as e:
-            log.warning("Embed failed for %s: %s", url, e)
-            await interaction.followup.send(
-                "Couldn't download that video. It may be private, deleted, or region-locked.",
-                ephemeral=True,
-            )
+            log.warning("Embed link failed for %s: %s", url, e)
+            await interaction.followup.send("Couldn't turn that into an embeddable link.", ephemeral=True)
             return
 
-        try:
-            size = video_path.stat().st_size
-            if size > EMBED_MAX_FILE_BYTES:
-                await interaction.followup.send(
-                    f"Downloaded video is too large "
-                    f"({size / 1e6:.1f} MB, limit {EMBED_MAX_FILE_BYTES / 1e6:.0f} MB).",
-                    ephemeral=True,
-                )
-                return
+        label = f"`{source}` · requested by {interaction.user.mention}"
+        msg = None
+        for embed_url in candidates:
+            if msg is None:
+                msg = await interaction.followup.send(embed_url, wait=True)
+            else:
+                await msg.edit(content=embed_url, embeds=[])
 
-            # Always re-encode to H.264/AAC — raw TikTok/IG downloads often use
-            # HEVC/VP9 that Discord desktop plays but mobile clients reject.
+            for _ in range(6):
+                await asyncio.sleep(1)
+                try:
+                    msg = await msg.channel.fetch_message(msg.id)
+                except discord.HTTPException:
+                    break
+                if msg.embeds:
+                    await msg.edit(content=label)
+                    log.info("Embedded [%s] via %s in #%s", source, embed_url, interaction.channel)
+                    return
+
+            log.info("No preview from %s", embed_url)
+
+        if msg:
             try:
-                upload_path = await asyncio.to_thread(
-                    compress_for_embed, video_path, EMBED_COMPRESS_THRESHOLD_BYTES,
-                )
-            except Exception as e:
-                log.warning("Mobile-safe encode failed for %s: %s", url, e)
-                await interaction.followup.send(
-                    "Downloaded the video but couldn't convert it for Discord playback.",
-                    ephemeral=True,
-                )
-                return
-
-            upload_size = upload_path.stat().st_size
-            if upload_size > EMBED_MAX_FILE_BYTES:
-                await interaction.followup.send(
-                    f"Video is still too large after compression "
-                    f"({upload_size / 1e6:.1f} MB).",
-                    ephemeral=True,
-                )
-                return
-
-            safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in title)[:80]
-            if not safe_name:
-                safe_name = "video"
-            safe_name += ".mp4"
-
-            file = discord.File(upload_path, filename=safe_name)
-            note = ""
-            if size != upload_size:
-                note = f" · {size / 1e6:.1f}→{upload_size / 1e6:.1f} MB"
-            await interaction.followup.send(
-                content=(
-                    f"**{title}**\n"
-                    f"`{source}` · requested by {interaction.user.mention}{note}"
-                ),
-                file=file,
-            )
-            log.info(
-                "Embedded %s (%s, %.1f MB) in #%s",
-                title, source, upload_size / 1e6, interaction.channel,
-            )
-        except discord.HTTPException as e:
-            log.warning("Failed to upload embed for %s: %s", url, e)
-            await interaction.followup.send(
-                "Downloaded the video but Discord rejected the upload "
-                "(file may exceed this server's upload limit).",
-                ephemeral=True,
-            )
-        finally:
-            for path in {p for p in (video_path, upload_path) if p}:
-                path.unlink(missing_ok=True)
-                for leftover in path.parent.glob(f"{path.stem}.*"):
-                    leftover.unlink(missing_ok=True)
-                # also clear intermediate compress passes for the original stem
-                if video_path:
-                    for leftover in video_path.parent.glob(f"{video_path.stem}_c*.mp4"):
-                        leftover.unlink(missing_ok=True)
+                await msg.delete()
+            except discord.HTTPException:
+                pass
+        await interaction.followup.send(
+            "Discord didn't attach a video preview for that link.",
+            ephemeral=True,
+        )
 
     @tree.command(name="backfill_server", description="Index all past videos across the entire server")
     @app_commands.default_permissions(administrator=True)

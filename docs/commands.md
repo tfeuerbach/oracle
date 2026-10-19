@@ -29,13 +29,13 @@ List all channels currently being monitored for videos.
 
 ### `/embed`
 
-Download a video and post it in the current channel so people can watch without leaving Discord.
+Post a link Discord unfurls as an inline video. Nothing is downloaded, so length and file size don't matter.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | Yes | Instagram, TikTok, Reddit, or YouTube Shorts link (including proxies like `kkinstagram.com` / `tnktok.com`) |
+| `url` | string | Yes | YouTube (any length), Instagram, TikTok, or Reddit link |
 
-Supported: Instagram, TikTok, Reddit video posts, and YouTube Shorts only (`/shorts/...`). Every clip is re-encoded to H.264/AAC (Discord mobile-safe); videos over 10 MB are also scaled down. Hard max is 200 MB. Temp files are deleted after posting.
+Instagram tries `kkinstagram.com`, `ddinstagram.com`, then `d.oginstagram.com`. TikTok tries `tnktok.com`, then `vxtiktok.com`. Reddit tries `rxddit.com`, then `vxreddit.com`. YouTube is posted as-is. Once Discord attaches the preview, the URL is removed from the message.
 
 ### `/preference`
 

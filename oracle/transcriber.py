@@ -67,6 +67,66 @@ def extract_video_urls(text: str):
     return results
 
 
+# Tried in order until Discord attaches a video preview.
+# YouTube unfurls on its own, so it has no proxy host.
+EMBED_PROXY_HOSTS = {
+    "instagram": [
+        "www.kkinstagram.com",
+        "www.ddinstagram.com",
+        "www.d.oginstagram.com",
+        "d.oginstagram.com",
+    ],
+    "tiktok": [
+        "www.tnktok.com",
+        "www.vxtiktok.com",
+        "tnktok.com",
+    ],
+    "reddit": [
+        "www.rxddit.com",
+        "www.vxreddit.com",
+        "rxddit.com",
+    ],
+}
+EMBED_LINK_SOURCES = set(EMBED_PROXY_HOSTS) | {"youtube"}
+
+
+async def embed_url_candidates(url: str):
+    """Return (candidate URLs, source) for Discord's inline player. No download."""
+    raw = url.strip().rstrip(".,;:!?")
+    matches = extract_video_urls(raw)
+    if not matches:
+        domain = urlparse(raw).netloc.lower()
+        source = VIDEO_URL_DOMAINS.get(domain)
+        if not source:
+            raise ValueError(
+                "Not a supported link. Use YouTube, Instagram, TikTok, or Reddit."
+            )
+        matches = [(raw, source)]
+
+    resolved_url, source = matches[0]
+    if source not in EMBED_LINK_SOURCES:
+        raise ValueError("Only YouTube, Instagram, TikTok, and Reddit links work with /embed.")
+
+    if source in EMBED_PROXY_HOSTS:
+        resolved = await resolve_redirect(resolved_url)
+        if resolved:
+            resolved_url = resolved
+
+    if source == "youtube":
+        return [resolved_url], source
+
+    parsed = urlparse(resolved_url)._replace(query="", fragment="")
+    if parsed.netloc.lower().endswith("v.redd.it"):
+        return [resolved_url], source
+
+    seen = []
+    for host in EMBED_PROXY_HOSTS[source]:
+        candidate = urlunparse(parsed._replace(netloc=host))
+        if candidate not in seen:
+            seen.append(candidate)
+    return seen, source
+
+
 async def resolve_redirect(url: str):
     """Follow HTTP redirects to get the final URL (e.g. Reddit /s/ share links)."""
     try:

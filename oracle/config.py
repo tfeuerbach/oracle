@@ -40,6 +40,8 @@ VIDEO_URL_DOMAINS: dict[str, str] = {
     "vm.tiktok.com": "tiktok",
     "tnktok.com": "tiktok",
     "www.tnktok.com": "tiktok",
+    "vxtiktok.com": "tiktok",
+    "www.vxtiktok.com": "tiktok",
     "streamable.com": "link",
     "clips.twitch.tv": "twitch",
     "twitch.tv": "twitch",
@@ -52,6 +54,12 @@ VIDEO_URL_DOMAINS: dict[str, str] = {
     "www.kkinstagram.com": "instagram",
     "ddinstagram.com": "instagram",
     "www.ddinstagram.com": "instagram",
+    "d.oginstagram.com": "instagram",
+    "www.d.oginstagram.com": "instagram",
+    "rxddit.com": "reddit",
+    "www.rxddit.com": "reddit",
+    "vxreddit.com": "reddit",
+    "www.vxreddit.com": "reddit",
 }
 
 DATA_ROOT = Path(os.getenv("ORACLE_DATA_DIR", "."))
