@@ -35,7 +35,7 @@ Post a link Discord unfurls as an inline video. Nothing is downloaded, so length
 |-----------|------|----------|-------------|
 | `url` | string | Yes | YouTube (any length), Instagram, TikTok, or Reddit link |
 
-Instagram tries `kkinstagram.com`, `ddinstagram.com`, then `d.oginstagram.com`. TikTok tries `tnktok.com`, then `vxtiktok.com`. Reddit tries `rxddit.com`, then `vxreddit.com`. YouTube is posted as-is. The link stays in the message; Discord drops the player if that link is edited out.
+Instagram tries `d.oginstagram.com` first, then `kkinstagram.com` and `ddinstagram.com`. TikTok tries `tnktok.com`, then `vxtiktok.com`. Reddit tries `rxddit.com`, then `vxreddit.com`. YouTube is posted as-is. The link stays in the message; Discord drops the player if that link is edited out.
 
 ### `/preference`
 

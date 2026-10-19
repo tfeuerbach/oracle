@@ -71,10 +71,10 @@ def extract_video_urls(text: str):
 # YouTube unfurls on its own, so it has no proxy host.
 EMBED_PROXY_HOSTS = {
     "instagram": [
-        "www.kkinstagram.com",
-        "www.ddinstagram.com",
         "www.d.oginstagram.com",
         "d.oginstagram.com",
+        "www.kkinstagram.com",
+        "www.ddinstagram.com",
     ],
     "tiktok": [
         "www.tnktok.com",
