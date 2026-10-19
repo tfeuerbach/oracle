@@ -35,7 +35,7 @@ Download a video and post it in the current channel so people can watch without 
 |-----------|------|----------|-------------|
 | `url` | string | Yes | Instagram, TikTok, Reddit, or YouTube Shorts link (including proxies like `kkinstagram.com` / `tnktok.com`) |
 
-Supported: Instagram, TikTok, Reddit video posts, and YouTube Shorts only (`/shorts/...`). Videos over 10 MB are automatically scaled/compressed before upload. Hard max is 200 MB. Temp files are deleted after posting.
+Supported: Instagram, TikTok, Reddit video posts, and YouTube Shorts only (`/shorts/...`). Every clip is re-encoded to H.264/AAC (Discord mobile-safe); videos over 10 MB are also scaled down. Hard max is 200 MB. Temp files are deleted after posting.
 
 ### `/preference`
 

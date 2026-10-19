@@ -348,15 +348,19 @@ def register(tree: app_commands.CommandTree):
                 )
                 return
 
-            upload_path = video_path
-            if size > EMBED_COMPRESS_THRESHOLD_BYTES:
-                try:
-                    upload_path = await asyncio.to_thread(
-                        compress_for_embed, video_path, EMBED_COMPRESS_THRESHOLD_BYTES,
-                    )
-                except Exception as e:
-                    log.warning("Compress failed for %s, uploading original: %s", url, e)
-                    upload_path = video_path
+            # Always re-encode to H.264/AAC — raw TikTok/IG downloads often use
+            # HEVC/VP9 that Discord desktop plays but mobile clients reject.
+            try:
+                upload_path = await asyncio.to_thread(
+                    compress_for_embed, video_path, EMBED_COMPRESS_THRESHOLD_BYTES,
+                )
+            except Exception as e:
+                log.warning("Mobile-safe encode failed for %s: %s", url, e)
+                await interaction.followup.send(
+                    "Downloaded the video but couldn't convert it for Discord playback.",
+                    ephemeral=True,
+                )
+                return
 
             upload_size = upload_path.stat().st_size
             if upload_size > EMBED_MAX_FILE_BYTES:
@@ -374,8 +378,8 @@ def register(tree: app_commands.CommandTree):
 
             file = discord.File(upload_path, filename=safe_name)
             note = ""
-            if upload_path != video_path and size > upload_size:
-                note = f" · compressed {size / 1e6:.1f}→{upload_size / 1e6:.1f} MB"
+            if size != upload_size:
+                note = f" · {size / 1e6:.1f}→{upload_size / 1e6:.1f} MB"
             await interaction.followup.send(
                 content=(
                     f"**{title}**\n"

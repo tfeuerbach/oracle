@@ -492,8 +492,11 @@ def ytdlp_download_video(url: str, output_path: Path):
 
 EMBED_SOURCES = {"instagram", "tiktok", "reddit", "youtube"}
 
-# Progressive compress attempts: (max width, crf, audio kbps)
+# Progressive encode attempts: (max width, crf, audio kbps)
+# Always re-encode to H.264/AAC — Discord mobile rejects HEVC/VP9/odd profiles
+# that desktop clients often play fine.
 EMBED_COMPRESS_PASSES = (
+    (720, 23, 128),
     (720, 28, 96),
     (540, 32, 64),
     (360, 35, 48),
@@ -504,69 +507,97 @@ def is_youtube_short(url: str):
     return "/shorts/" in urlparse(url).path.lower()
 
 
-def compress_for_embed(video_path: Path, target_bytes: int = None):
-    """Scale/re-encode a video to fit under target_bytes. Returns path to output file.
+def video_has_audio(video_path: Path):
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+         str(video_path)],
+        capture_output=True, text=True, timeout=30,
+    )
+    return bool(result.stdout.strip())
 
-    Tries progressively smaller resolutions until under the target (default 10 MB).
+
+def compress_for_embed(video_path: Path, target_bytes: int = None):
+    """Re-encode to Discord-mobile-safe H.264/AAC MP4. Returns path to output file.
+
+    Always remuxes/re-encodes (even small files) so mobile clients can play clips.
+    When over target_bytes, progressively scales down until under the limit.
     Caller owns cleanup of both the original and returned path if they differ.
     """
     target = target_bytes or EMBED_COMPRESS_THRESHOLD_BYTES
     size = video_path.stat().st_size
-    if size <= target:
-        return video_path
-
     duration = get_duration(video_path) or 0
+    has_audio = video_has_audio(video_path)
+
     log.info(
-        "Compressing embed video %.1f MB -> target %.1f MB (duration=%.1fs)",
-        size / 1e6, target / 1e6, duration,
+        "Preparing embed video %.1f MB (duration=%.1fs, audio=%s, target=%.1f MB)",
+        size / 1e6, duration, has_audio, target / 1e6,
     )
 
     best_path = None
     best_size = size
 
     for max_w, crf, audio_kbps in EMBED_COMPRESS_PASSES:
-        out = video_path.with_name(f"{video_path.stem}_c{max_w}.mp4")
-        # Cap video bitrate so short clips still land near the target size
-        if duration > 1:
-            # leave ~15% headroom for container overhead
+        # One successful mobile-safe pass is enough when already under the size target
+        if best_path is not None and best_size <= target:
+            break
+
+        out = video_path.with_name(f"{video_path.stem}_c{max_w}_{crf}.mp4")
+
+        bitrate_args = []
+        if (best_path is not None or size > target) and duration > 1:
             total_kbps = int((target * 8 * 0.85) / duration / 1000)
             video_kbps = max(total_kbps - audio_kbps, 150)
-            bitrate_args = ["-b:v", f"{video_kbps}k", "-maxrate", f"{video_kbps}k", "-bufsize", f"{video_kbps * 2}k"]
-        else:
-            bitrate_args = []
+            bitrate_args = [
+                "-b:v", f"{video_kbps}k",
+                "-maxrate", f"{video_kbps}k",
+                "-bufsize", f"{video_kbps * 2}k",
+            ]
 
-        cmd = [
-            "ffmpeg", "-y", "-i", str(video_path),
-            "-vf", f"scale='min({max_w},iw)':-2",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+        # even dims + yuv420p + main profile = plays on Discord iOS/Android
+        vf = f"scale='min({max_w},iw)':-2"
+
+        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
+        if not has_audio:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+        cmd += [
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-profile:v", "main",
+            "-level", "4.0",
+            "-pix_fmt", "yuv420p",
+            "-crf", str(crf),
             *bitrate_args,
-            "-c:a", "aac", "-b:a", f"{audio_kbps}k",
-            "-movflags", "+faststart",
-            str(out),
+            "-c:a", "aac",
+            "-b:a", f"{audio_kbps if has_audio else 64}k",
+            "-ac", "2",
+            "-ar", "44100",
         ]
+        if not has_audio:
+            cmd += ["-shortest"]
+        cmd += ["-movflags", "+faststart", str(out)]
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0 or not out.exists():
-            log.warning("Compress pass %dp failed: %s", max_w, (result.stderr or "")[-300:])
+            log.warning("Encode pass %dp/crf%s failed: %s", max_w, crf, (result.stderr or "")[-400:])
             out.unlink(missing_ok=True)
             continue
 
         out_size = out.stat().st_size
-        log.info("  compress pass %dp -> %.1f MB", max_w, out_size / 1e6)
+        log.info("  encode pass %dp/crf%s -> %.1f MB", max_w, crf, out_size / 1e6)
 
         if best_path and best_path != out:
             best_path.unlink(missing_ok=True)
         best_path = out
         best_size = out_size
 
-        if out_size <= target:
-            break
-
     if best_path is None:
-        raise RuntimeError("ffmpeg failed to compress video for embed")
+        raise RuntimeError("ffmpeg failed to prepare video for embed")
 
     if best_size > target:
         log.warning(
-            "Compressed embed still %.1f MB (target %.1f MB) -- uploading best effort",
+            "Embed still %.1f MB after encode (target %.1f MB) -- uploading best effort",
             best_size / 1e6, target / 1e6,
         )
 
