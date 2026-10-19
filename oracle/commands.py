@@ -322,7 +322,6 @@ def register(tree: app_commands.CommandTree):
             await interaction.followup.send("Couldn't turn that into an embeddable link.", ephemeral=True)
             return
 
-        label = f"`{source}` · requested by {interaction.user.mention}"
         msg = None
         for embed_url in candidates:
             if msg is None:
@@ -330,28 +329,20 @@ def register(tree: app_commands.CommandTree):
             else:
                 await msg.edit(content=embed_url, embeds=[])
 
-            for _ in range(6):
+            for _ in range(10):
                 await asyncio.sleep(1)
                 try:
-                    msg = await msg.channel.fetch_message(msg.id)
-                except discord.HTTPException:
-                    break
+                    msg = await interaction.followup.fetch_message(msg.id)
+                except discord.HTTPException as e:
+                    log.info("Preview check failed for %s: %s", embed_url, e)
+                    continue
                 if msg.embeds:
-                    await msg.edit(content=label)
                     log.info("Embedded [%s] via %s in #%s", source, embed_url, interaction.channel)
                     return
 
             log.info("No preview from %s", embed_url)
 
-        if msg:
-            try:
-                await msg.delete()
-            except discord.HTTPException:
-                pass
-        await interaction.followup.send(
-            "Discord didn't attach a video preview for that link.",
-            ephemeral=True,
-        )
+        log.info("Left the link up; Discord never attached a preview")
 
     @tree.command(name="backfill_server", description="Index all past videos across the entire server")
     @app_commands.default_permissions(administrator=True)
